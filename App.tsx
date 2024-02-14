@@ -1,118 +1,111 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React, { useEffect, useState } from 'react';
+import { Text, View, Button, Platform, PermissionsAndroid, Alert } from 'react-native';
+import { BleManager, State, Device } from 'react-native-ble-plx';
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+const BluetoothApp = () => {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [bluetoothState, setBluetoothState] = useState<State>(State.Unknown);
+  const manager = new BleManager();
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  useEffect(() => {
+    const subscription = manager.onStateChange(state => {
+      setBluetoothState(state);
+    }, true);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
+  const requestBluetoothPermission = async () => {
+    try {
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+            title: 'Location Permission',
+            message: 'This app needs access to your location to use Bluetooth',
+            buttonPositive: 'OK',
+          }
+        );
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          console.log('Location permission granted');
+          return true;
+        } else {
+          console.log('Location permission denied');
+          return false;
+        }
+      } else if (Platform.OS === 'ios') {
+        // Request Bluetooth permissions for iOS
+        const bleGranted = await manager.enable();
+        if (bleGranted) {
+          console.log('Bluetooth permission granted');
+          return true;
+        } else {
+          console.log('Bluetooth permission denied');
+          return false;
+        }
+      }
+    } catch (error) {
+      console.error('Permission Error:', error);
+      return false;
+    }
+  };
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const startScan = async () => {
+    try {
+      setScanning(true);
+      const permissionGranted = await requestBluetoothPermission();
+      if (!permissionGranted) {
+        Alert.alert(
+          'Permission Required',
+          'Bluetooth scanning requires Bluetooth permission. Please grant the permission to use Bluetooth.'
+        );
+        return;
+      }
+      if (bluetoothState !== State.PoweredOn) {
+        Alert.alert('Bluetooth Error', 'Bluetooth is not enabled on your device.');
+        return;
+      }
+      manager.startDeviceScan(null, null, (error, device) => {
+        if (error) {
+          console.error('Scan Error:', error);
+          Alert.alert('Scan Error', 'Failed to start device scan. Please try again.');
+          setScanning(false); // Stop scanning if an error occurs
+          return;
+        }
+        if (device) {
+          setDevices(prevDevices => {
+            const existingDevice = prevDevices.find(d => d && d.id === device.id);
+            if (!existingDevice) {
+              return [...prevDevices, device];
+            }
+            return prevDevices;
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Scan Error:', error);
+      Alert.alert('Scan Error', 'Failed to start device scan. Please try again.');
+      setScanning(false); // Stop scanning if an error occurs
+    }
+  };
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  const stopScan = () => {
+    setScanning(false);
+    manager.stopDeviceScan();
   };
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Button title={scanning ? 'Stop Scan' : 'Start Scan'} onPress={scanning ? stopScan : startScan} />
+      <Text>Devices:</Text>
+      {devices.filter(device => device !== null).map(device => (
+        <Text key={device!.id}>{device!.name || 'Unknown Device'}</Text>
+      ))}
+    </View>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
-
-export default App;
+export default BluetoothApp;
